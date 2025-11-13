@@ -1,20 +1,20 @@
-import { create } from 'zustand';
-import { GameState, Building, Upgrade, Achievement } from '@/types/game';
+import { create } from "zustand";
+import { GameState, Building, Upgrade, Achievement } from "@/types/game";
 import {
   INITIAL_BUILDINGS,
   INITIAL_UPGRADES,
   INITIAL_ACHIEVEMENTS,
   calculateBuildingCost,
   PRESTIGE_MULTIPLIER_BASE,
-} from '@/lib/gameData';
-import { supabase } from '@/lib/supabase';
+} from "@/lib/gameData";
+import { supabase } from "@/lib/supabase";
 
 interface GameStore extends GameState {
-  // Actions
   clickCookie: () => void;
   buyBuilding: (buildingId: string) => void;
   buyUpgrade: (upgradeId: string) => void;
   tick: () => void;
+  calculateCPS: () => void;
   saveGame: () => Promise<void>;
   loadGame: () => Promise<void>;
   prestige: () => Promise<void>;
@@ -88,8 +88,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   tick: () => {
     const { cps, prestigeMultiplier } = get();
-    const cookiesThisTick = (cps * prestigeMultiplier) / 10; // Divided by 10 for 100ms ticks
-
+    const cookiesThisTick = (cps * prestigeMultiplier) / 10;
     set((state) => ({
       cookies: state.cookies + cookiesThisTick,
       totalCookies: state.totalCookies + cookiesThisTick,
@@ -98,24 +97,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   calculateCPS: () => {
     const { buildings, upgrades, prestigeMultiplier } = get();
-    
     let totalCPS = 0;
+
     buildings.forEach((building) => {
       let buildingCPS = building.baseProduction * building.count;
-      
-      // Apply building-specific upgrades
+
       upgrades
-        .filter((u) => u.purchased && u.name.toLowerCase().includes(building.name.toLowerCase()))
+        .filter(
+          (u) =>
+            u.purchased &&
+            u.name.toLowerCase().includes(building.name.toLowerCase())
+        )
         .forEach((upgrade) => {
           buildingCPS *= upgrade.multiplier;
         });
-      
+
       totalCPS += buildingCPS;
     });
 
-    // Apply global upgrades
     const globalUpgrades = upgrades.filter(
-      (u) => u.purchased && u.name.toLowerCase().includes('all')
+      (u) => u.purchased && u.name.toLowerCase().includes("all")
     );
     globalUpgrades.forEach((upgrade) => {
       totalCPS *= upgrade.multiplier;
@@ -126,27 +127,39 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   saveGame: async () => {
     const state = get();
-    const { data: { user } } = await supabase.auth.getUser();
-    
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) {
-      // Save to localStorage if not logged in
-      localStorage.setItem('cookieClickerSave', JSON.stringify({
-        cookies: state.cookies,
-        totalCookies: state.totalCookies,
-        cps: state.cps,
-        clickPower: state.clickPower,
-        buildings: state.buildings,
-        upgrades: state.upgrades,
-        achievements: state.achievements,
-        prestigeLevel: state.prestigeLevel,
-        prestigeMultiplier: state.prestigeMultiplier,
-        lastActive: Date.now(),
-      }));
+      // Save locally if not logged in
+      const cleanedAchievements = state.achievements.map(
+        ({ condition, ...rest }) => rest
+      );
+      localStorage.setItem(
+        "cookieClickerSave",
+        JSON.stringify({
+          cookies: state.cookies,
+          totalCookies: state.totalCookies,
+          cps: state.cps,
+          clickPower: state.clickPower,
+          buildings: state.buildings,
+          upgrades: state.upgrades,
+          achievements: cleanedAchievements,
+          prestigeLevel: state.prestigeLevel,
+          prestigeMultiplier: state.prestigeMultiplier,
+          lastActive: Date.now(),
+        })
+      );
       return;
     }
 
-    // Save to Supabase
-    await supabase.from('game_state').upsert({
+    // Clean achievements before saving (remove functions)
+    const cleanedAchievements = state.achievements.map(
+      ({ condition, ...rest }) => rest
+    );
+
+    await supabase.from("game_state").upsert({
       user_id: user.id,
       cookies: state.cookies,
       total_cookies: state.totalCookies,
@@ -154,16 +167,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       click_power: state.clickPower,
       buildings: state.buildings,
       upgrades: state.upgrades,
-      achievements: state.achievements,
+      achievements: cleanedAchievements,
       prestige_level: state.prestigeLevel,
       multiplier: state.prestigeMultiplier,
       last_active: new Date().toISOString(),
     });
 
-    // Update leaderboard
-    await supabase.from('leaderboard').upsert({
+    await supabase.from("leaderboard").upsert({
       user_id: user.id,
-      username: user.email?.split('@')[0] || 'Anonymous',
+      username: user.email?.split("@")[0] || "Anonymous",
       total_cookies: state.totalCookies,
       prestige_level: state.prestigeLevel,
       updated_at: new Date().toISOString(),
@@ -173,19 +185,35 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   loadGame: async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    // --- Load from localStorage if no user ---
     if (!user) {
-      // Load from localStorage
-      const saved = localStorage.getItem('cookieClickerSave');
+      const saved = localStorage.getItem("cookieClickerSave");
       if (saved) {
         const data = JSON.parse(saved);
+
+        const mergedAchievements = (data.achievements || []).map(
+          (savedAch: any) => {
+            const original = INITIAL_ACHIEVEMENTS.find(
+              (a) => a.id === savedAch.id
+            );
+            return {
+              ...original,
+              ...savedAch,
+              condition: original?.condition || (() => false),
+            };
+          }
+        );
+
         set({
           ...data,
+          achievements: mergedAchievements,
           lastActive: data.lastActive || Date.now(),
         });
-        
-        // Calculate offline progress
+
         const offlineCookies = get().calculateOfflineProgress(data.lastActive);
         if (offlineCookies > 0) {
           set((state) => ({
@@ -193,21 +221,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
             totalCookies: state.totalCookies + offlineCookies,
           }));
         }
-        
+
         get().calculateCPS();
         get().checkAchievements();
       }
       return;
     }
 
-    // Load from Supabase
+    // --- Load from Supabase if logged in ---
     const { data, error } = await supabase
-      .from('game_state')
-      .select('*')
-      .eq('user_id', user.id)
+      .from("game_state")
+      .select("*")
+      .eq("user_id", user.id)
       .single();
 
     if (data && !error) {
+      const mergedAchievements = (data.achievements || []).map(
+        (savedAch: any) => {
+          const original = INITIAL_ACHIEVEMENTS.find(
+            (a) => a.id === savedAch.id
+          );
+          return {
+            ...original,
+            ...savedAch,
+            condition: original?.condition || (() => false),
+          };
+        }
+      );
+
       set({
         cookies: data.cookies,
         totalCookies: data.total_cookies,
@@ -215,16 +256,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
         clickPower: data.click_power,
         buildings: data.buildings || INITIAL_BUILDINGS,
         upgrades: data.upgrades || INITIAL_UPGRADES,
-        achievements: data.achievements || INITIAL_ACHIEVEMENTS,
+        achievements: mergedAchievements,
         prestigeLevel: data.prestige_level,
         prestigeMultiplier: data.multiplier,
         lastActive: new Date(data.last_active).getTime(),
       });
 
-      // Calculate offline progress
       const lastActiveTime = new Date(data.last_active).getTime();
       const offlineCookies = get().calculateOfflineProgress(lastActiveTime);
-      
       if (offlineCookies > 0) {
         set((state) => ({
           cookies: state.cookies + offlineCookies,
@@ -240,10 +279,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   calculateOfflineProgress: (lastActive: number) => {
     const now = Date.now();
     const elapsedSeconds = (now - lastActive) / 1000;
-    
-    // Cap offline time at 24 hours
     const cappedSeconds = Math.min(elapsedSeconds, 24 * 60 * 60);
-    
     const { cps, prestigeMultiplier } = get();
     return cps * prestigeMultiplier * cappedSeconds;
   },
@@ -253,7 +289,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     let updated = false;
 
     const newAchievements = state.achievements.map((achievement) => {
-      if (!achievement.unlocked && achievement.condition(state)) {
+      if (
+        !achievement.unlocked &&
+        typeof achievement.condition === "function" &&
+        achievement.condition(state)
+      ) {
         updated = true;
         return { ...achievement, unlocked: true };
       }
