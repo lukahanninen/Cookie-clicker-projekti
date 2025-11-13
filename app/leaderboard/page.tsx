@@ -11,30 +11,6 @@ export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadLeaderboard();
-
-    // Subscribe to real-time updates
-    const subscription = supabase
-      .channel('leaderboard-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'leaderboard',
-        },
-        () => {
-          loadLeaderboard();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
   const loadLeaderboard = async () => {
     const { data, error } = await supabase
       .from('leaderboard')
@@ -42,11 +18,35 @@ export default function LeaderboardPage() {
       .order('total_cookies', { ascending: false })
       .limit(100);
 
-    if (data && !error) {
-      setEntries(data);
+    if (error) {
+      console.error('Error loading leaderboard:', error);
+      return;
     }
+
+    if (data) setEntries(data);
     setLoading(false);
   };
+
+  useEffect(() => {
+    loadLeaderboard();
+
+    // Real-time subscription to leaderboard changes
+    const channel = supabase
+      .channel('public:leaderboard')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leaderboard' },
+        (payload) => {
+          console.log('Leaderboard update received:', payload);
+          loadLeaderboard();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -74,14 +74,13 @@ export default function LeaderboardPage() {
         </div>
       </header>
 
-      {/* Leaderboard */}
+      {/* Table */}
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
           {entries.length === 0 ? (
             <div className="p-12 text-center text-gray-500">
               <div className="text-6xl mb-4">🍪</div>
               <p className="text-xl">No players on the leaderboard yet!</p>
-              <p className="mt-2">Be the first to claim your spot.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -97,7 +96,7 @@ export default function LeaderboardPage() {
                 <tbody>
                   {entries.map((entry, index) => (
                     <tr
-                      key={entry.id}
+                      key={entry.user_id || index}
                       className={`border-b border-gray-200 hover:bg-gray-50 transition-colors ${
                         index < 3 ? 'bg-yellow-50' : ''
                       }`}
@@ -107,20 +106,12 @@ export default function LeaderboardPage() {
                           {index === 0 && <span className="text-2xl">🥇</span>}
                           {index === 1 && <span className="text-2xl">🥈</span>}
                           {index === 2 && <span className="text-2xl">🥉</span>}
-                          <span className="font-bold text-gray-700">
-                            #{index + 1}
-                          </span>
+                          <span className="font-bold text-gray-700">#{index + 1}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="font-semibold text-gray-800">
-                          {entry.username}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <span className="font-bold text-blue-600">
-                          {formatNumber(entry.total_cookies)}
-                        </span>
+                      <td className="px-6 py-4 font-semibold text-gray-800">{entry.username}</td>
+                      <td className="px-6 py-4 text-right font-bold text-blue-600">
+                        {formatNumber(entry.total_cookies)}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <div className="inline-flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 rounded-full font-semibold">
