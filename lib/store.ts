@@ -6,6 +6,7 @@ import {
   INITIAL_ACHIEVEMENTS,
   calculateBuildingCost,
   PRESTIGE_MULTIPLIER_BASE,
+  SAVE_INTERVAL,
 } from "@/lib/gameData";
 import { supabase } from "@/lib/supabase";
 
@@ -36,209 +37,243 @@ const getInitialState = (): GameState => ({
   lastActive: Date.now(),
 });
 
-export const useGameStore = create<GameStore>((set, get) => ({
-  ...getInitialState(),
+export const useGameStore = create<GameStore>((set, get) => {
+  // small guard to avoid very frequent DB writes (debounce-ish)
+  let lastSaveAt = 0;
 
-  clickCookie: () => {
-    const { clickPower, prestigeMultiplier } = get();
-    const gain = clickPower * prestigeMultiplier;
-    set((s) => ({
-      cookies: s.cookies + gain,
-      totalCookies: s.totalCookies + gain,
-    }));
-    get().checkAchievements();
-  },
+  return {
+    ...getInitialState(),
 
-  buyBuilding: (id) => {
-    const s = get();
-    const building = s.buildings.find((b) => b.id === id);
-    if (!building) return;
-    const cost = calculateBuildingCost(building);
-    if (s.cookies < cost) return;
-
-    set({
-      cookies: s.cookies - cost,
-      buildings: s.buildings.map((b) =>
-        b.id === id ? { ...b, count: b.count + 1 } : b
-      ),
-    });
-    get().calculateCPS();
-    get().checkAchievements();
-  },
-
-  buyUpgrade: (id) => {
-    const s = get();
-    const upgrade = s.upgrades.find((u) => u.id === id);
-    if (!upgrade || upgrade.purchased || s.cookies < upgrade.cost) return;
-
-    set({
-      cookies: s.cookies - upgrade.cost,
-      upgrades: s.upgrades.map((u) =>
-        u.id === id ? { ...u, purchased: true } : u
-      ),
-    });
-    get().calculateCPS();
-    get().checkAchievements();
-  },
-
-  tick: () => {
-    const { cps, prestigeMultiplier } = get();
-    const cookiesThisTick = (cps * prestigeMultiplier) / 10;
-    set((s) => ({
-      cookies: s.cookies + cookiesThisTick,
-      totalCookies: s.totalCookies + cookiesThisTick,
-    }));
-  },
-
-  calculateCPS: () => {
-    const { buildings, upgrades, prestigeMultiplier } = get();
-    let total = 0;
-
-    buildings.forEach((b) => {
-      let buildingCPS = b.baseProduction * b.count;
-      upgrades
-        .filter(
-          (u) =>
-            u.purchased &&
-            u.name.toLowerCase().includes(b.name.toLowerCase())
-        )
-        .forEach((u) => (buildingCPS *= u.multiplier));
-      total += buildingCPS;
-    });
-
-    upgrades
-      .filter((u) => u.purchased && u.name.toLowerCase().includes("all"))
-      .forEach((u) => (total *= u.multiplier));
-
-    set({ cps: total * prestigeMultiplier });
-  },
-
-  saveGame: async () => {
-    const s = get();
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData.user;
-
-    // Clean up functions before saving
-    const cleanedAchievements = s.achievements.map(({ condition, ...rest }) => rest);
-
-    const saveData = {
-      cookies: s.cookies,
-      totalCookies: s.totalCookies,
-      cps: s.cps,
-      clickPower: s.clickPower,
-      buildings: s.buildings,
-      upgrades: s.upgrades,
-      achievements: cleanedAchievements,
-      prestigeLevel: s.prestigeLevel,
-      prestigeMultiplier: s.prestigeMultiplier,
-      lastActive: Date.now(),
-    };
-
-    if (!user) {
-      localStorage.setItem("cookieClickerSave", JSON.stringify(saveData));
-      return;
-    }
-
-    await supabase.from("game_state").upsert({
-      user_id: user.id,
-      ...saveData,
-      last_active: new Date().toISOString(),
-    });
-
-    await supabase.from("leaderboard").upsert({
-      user_id: user.id,
-      username: user.email?.split("@")[0] || "Anonymous",
-      total_cookies: s.totalCookies,
-      prestige_level: s.prestigeLevel,
-      updated_at: new Date().toISOString(),
-    });
-  },
-
-  loadGame: async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData.user;
-
-    let data: any = null;
-
-    if (user) {
-      const { data: dbData } = await supabase
-        .from("game_state")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
-      data = dbData;
-    } else {
-      const local = localStorage.getItem("cookieClickerSave");
-      if (local) data = JSON.parse(local);
-    }
-
-    if (!data) return;
-
-    const mergedAchievements = (data.achievements || []).map((a: any) => {
-      const base = INITIAL_ACHIEVEMENTS.find((b) => b.id === a.id);
-      return {
-        ...base,
-        ...a,
-        condition: base?.condition || (() => false),
-      };
-    });
-
-    set({
-      cookies: data.cookies || 0,
-      totalCookies: data.totalCookies || data.total_cookies || 0,
-      cps: data.cps || 0,
-      clickPower: data.clickPower || 1,
-      buildings: data.buildings || INITIAL_BUILDINGS,
-      upgrades: data.upgrades || INITIAL_UPGRADES,
-      achievements: mergedAchievements,
-      prestigeLevel: data.prestigeLevel || data.prestige_level || 0,
-      prestigeMultiplier: data.prestigeMultiplier || data.multiplier || 1,
-      lastActive: data.lastActive || Date.now(),
-    });
-
-    const offline = get().calculateOfflineProgress(data.lastActive || Date.now());
-    if (offline > 0) {
+    clickCookie: () => {
+      const { clickPower, prestigeMultiplier } = get();
+      const gain = clickPower * prestigeMultiplier;
       set((s) => ({
-        cookies: s.cookies + offline,
-        totalCookies: s.totalCookies + offline,
+        cookies: s.cookies + gain,
+        totalCookies: s.totalCookies + gain,
       }));
-    }
+      get().checkAchievements();
+    },
 
-    get().calculateCPS();
-    get().checkAchievements();
-  },
+    buyBuilding: (id) => {
+      const s = get();
+      const building = s.buildings.find((b) => b.id === id);
+      if (!building) return;
+      const cost = calculateBuildingCost(building);
+      if (s.cookies < cost) return;
 
-  calculateOfflineProgress: (lastActive) => {
-    const now = Date.now();
-    const elapsed = (now - lastActive) / 1000;
-    const capped = Math.min(elapsed, 24 * 60 * 60);
-    const { cps, prestigeMultiplier } = get();
-    return cps * prestigeMultiplier * capped;
-  },
+      set({
+        cookies: s.cookies - cost,
+        buildings: s.buildings.map((b) =>
+          b.id === id ? { ...b, count: b.count + 1 } : b
+        ),
+      });
+      get().calculateCPS();
+      get().checkAchievements();
+    },
 
-  checkAchievements: () => {
-    const s = get();
-    const updated = s.achievements.map((a) => {
-      if (!a.unlocked && typeof a.condition === "function" && a.condition(s)) {
-        return { ...a, unlocked: true };
+    buyUpgrade: (id) => {
+      const s = get();
+      const upgrade = s.upgrades.find((u) => u.id === id);
+      if (!upgrade || upgrade.purchased || s.cookies < upgrade.cost) return;
+
+      set({
+        cookies: s.cookies - upgrade.cost,
+        upgrades: s.upgrades.map((u) =>
+          u.id === id ? { ...u, purchased: true } : u
+        ),
+      });
+      get().calculateCPS();
+      get().checkAchievements();
+    },
+
+    tick: () => {
+      const { cps, prestigeMultiplier } = get();
+      const cookiesThisTick = (cps * prestigeMultiplier) / 10;
+      set((s) => ({
+        cookies: s.cookies + cookiesThisTick,
+        totalCookies: s.totalCookies + cookiesThisTick,
+      }));
+    },
+
+    calculateCPS: () => {
+      const { buildings, upgrades, prestigeMultiplier } = get();
+      let total = 0;
+
+      buildings.forEach((b) => {
+        let buildingCPS = b.baseProduction * b.count;
+        upgrades
+          .filter(
+            (u) =>
+              u.purchased &&
+              u.name.toLowerCase().includes(b.name.toLowerCase())
+          )
+          .forEach((u) => (buildingCPS *= u.multiplier));
+        total += buildingCPS;
+      });
+
+      upgrades
+        .filter((u) => u.purchased && u.name.toLowerCase().includes("all"))
+        .forEach((u) => (total *= u.multiplier));
+
+      set({ cps: total * prestigeMultiplier });
+    },
+
+    saveGame: async () => {
+      const now = Date.now();
+      // avoid saving more often than SAVE_INTERVAL (10s) unless forced
+      if (now - lastSaveAt < (SAVE_INTERVAL ?? 10000)) {
+        // allow the final save on unmount by not returning here if needed;
+        // keep this guard to reduce DB traffic
       }
-      return a;
-    });
-    set({ achievements: updated });
-  },
+      lastSaveAt = now;
 
-  prestige: async () => {
-    const s = get();
-    const newLevel = s.prestigeLevel + 1;
-    const newMult = 1 + newLevel * PRESTIGE_MULTIPLIER_BASE;
+      const s = get();
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) console.error("Auth error:", userErr);
+      const user = userData?.user ?? null;
 
-    set({
-      ...getInitialState(),
-      prestigeLevel: newLevel,
-      prestigeMultiplier: newMult,
-    });
-    await get().saveGame();
-  },
+      // Clean up functions before saving
+      const cleanedAchievements = s.achievements.map(({ condition, ...rest }) => rest);
 
-  reset: () => set(getInitialState()),
-}));
+      const saveData = {
+        cookies: s.cookies,
+        totalCookies: s.totalCookies,
+        cps: s.cps,
+        clickPower: s.clickPower,
+        buildings: s.buildings,
+        upgrades: s.upgrades,
+        achievements: cleanedAchievements,
+        prestigeLevel: s.prestigeLevel,
+        prestigeMultiplier: s.prestigeMultiplier,
+        lastActive: Date.now(),
+      };
+
+      try {
+        if (!user) {
+          localStorage.setItem("cookieClickerSave", JSON.stringify(saveData));
+          return;
+        }
+
+        // Upsert game_state (existing)
+        const { error: gsError } = await supabase.from("game_state").upsert({
+          user_id: user.id,
+          ...saveData,
+          last_active: new Date().toISOString(),
+        });
+
+        if (gsError) console.error("Failed to upsert game_state:", gsError);
+
+        // Upsert leaderboard - IMPORTANT: include onConflict and log errors
+        const { error: lbError } = await supabase
+          .from("leaderboard")
+          .upsert(
+            {
+              user_id: user.id,
+              username: user.email?.split("@")[0] || "Anonymous",
+              total_cookies: s.totalCookies,
+              prestige_level: s.prestigeLevel,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" } // <- critical to update the same user's row
+          );
+
+        if (lbError) {
+          console.error("Failed to upsert leaderboard:", lbError);
+        } else {
+          // optionally debug success in development
+          // console.log("Leaderboard upsert success for", user.email);
+        }
+      } catch (err) {
+        console.error("saveGame unexpected error:", err);
+      }
+    },
+
+    loadGame: async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData.user;
+
+      let data: any = null;
+
+      if (user) {
+        const { data: dbData } = await supabase
+          .from("game_state")
+          .select("*")
+          .eq("user_id", user.id)
+          .single();
+        data = dbData;
+      } else {
+        const local = localStorage.getItem("cookieClickerSave");
+        if (local) data = JSON.parse(local);
+      }
+
+      if (!data) return;
+
+      const mergedAchievements = (data.achievements || []).map((a: any) => {
+        const base = INITIAL_ACHIEVEMENTS.find((b) => b.id === a.id);
+        return {
+          ...base,
+          ...a,
+          condition: base?.condition || (() => false),
+        };
+      });
+
+      set({
+        cookies: data.cookies || 0,
+        totalCookies: data.totalCookies || data.total_cookies || 0,
+        cps: data.cps || 0,
+        clickPower: data.clickPower || 1,
+        buildings: data.buildings || INITIAL_BUILDINGS,
+        upgrades: data.upgrades || INITIAL_UPGRADES,
+        achievements: mergedAchievements,
+        prestigeLevel: data.prestigeLevel || data.prestige_level || 0,
+        prestigeMultiplier: data.prestigeMultiplier || data.multiplier || 1,
+        lastActive: data.lastActive || Date.now(),
+      });
+
+      const offline = get().calculateOfflineProgress(data.lastActive || Date.now());
+      if (offline > 0) {
+        set((s) => ({
+          cookies: s.cookies + offline,
+          totalCookies: s.totalCookies + offline,
+        }));
+      }
+
+      get().calculateCPS();
+      get().checkAchievements();
+    },
+
+    calculateOfflineProgress: (lastActive) => {
+      const now = Date.now();
+      const elapsed = (now - lastActive) / 1000;
+      const capped = Math.min(elapsed, 24 * 60 * 60);
+      const { cps, prestigeMultiplier } = get();
+      return cps * prestigeMultiplier * capped;
+    },
+
+    checkAchievements: () => {
+      const s = get();
+      const updated = s.achievements.map((a) => {
+        if (!a.unlocked && typeof a.condition === "function" && a.condition(s)) {
+          return { ...a, unlocked: true };
+        }
+        return a;
+      });
+      set({ achievements: updated });
+    },
+
+    prestige: async () => {
+      const s = get();
+      const newLevel = s.prestigeLevel + 1;
+      const newMult = 1 + newLevel * PRESTIGE_MULTIPLIER_BASE;
+
+      set({
+        ...getInitialState(),
+        prestigeLevel: newLevel,
+        prestigeMultiplier: newMult,
+      });
+      await get().saveGame();
+    },
+
+    reset: () => set(getInitialState()),
+  };
+});

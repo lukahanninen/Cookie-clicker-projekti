@@ -13,36 +13,44 @@ export default function Achievements() {
     : achievements.filter((a) => a.unlocked);
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
+    <div className="bg-gray-800/70 border border-gray-700 rounded-2xl p-6 shadow-xl">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">
+        <h2 className="text-2xl font-bold text-yellow-400">
           Achievements ({unlockedCount}/{achievements.length})
         </h2>
+
         <button
           onClick={() => setShowAll(!showAll)}
-          className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+          className="text-sm text-blue-400 hover:text-blue-300 transition font-medium"
         >
           {showAll ? 'Show Unlocked' : 'Show All'}
         </button>
       </div>
 
+      {/* Achievements Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {displayAchievements.map((achievement) => (
           <div
             key={achievement.id}
-            className={`p-4 rounded-lg border-2 transition-all ${
+            className={`p-4 rounded-xl border transition-all ${
               achievement.unlocked
-                ? 'border-green-500 bg-green-50'
-                : 'border-gray-300 bg-gray-100 opacity-50'
+                ? 'border-green-500 bg-green-900/30'
+                : 'border-gray-700 bg-gray-900/40 opacity-50'
             }`}
           >
             <div className="text-4xl mb-2">{achievement.icon}</div>
-            <h3 className="font-bold text-sm text-gray-800 mb-1">
+
+            <h3 className="font-semibold text-sm text-gray-100 mb-1">
               {achievement.name}
             </h3>
-            <p className="text-xs text-gray-600">{achievement.description}</p>
+
+            <p className="text-xs text-gray-400">
+              {achievement.description}
+            </p>
+
             {achievement.unlocked && (
-              <div className="mt-2 text-xs text-green-600 font-semibold">
+              <div className="mt-2 text-xs text-green-400 font-semibold">
                 ✓ Unlocked
               </div>
             )}
@@ -50,8 +58,9 @@ export default function Achievements() {
         ))}
       </div>
 
+      {/* When no achievements */}
       {displayAchievements.length === 0 && (
-        <p className="text-center text-gray-500 py-8">
+        <p className="text-center text-gray-400 py-8">
           Start playing to unlock achievements!
         </p>
       )}

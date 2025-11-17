@@ -39,16 +39,16 @@ export default function CookieButton() {
   return (
     <div className="flex flex-col items-center justify-center p-8">
       <div className="text-center mb-8">
-        <h1 className="text-6xl font-bold text-cookie-brown mb-2">
+        <h1 className="text-6xl font-bold text-yellow-400 mb-2">
           {formatNumber(cookies)}
         </h1>
-        <p className="text-2xl text-gray-600">cookies</p>
+        <p className="text-2xl text-gray-300">cookies</p>
       </div>
 
       <div className="relative">
         <button
           onClick={handleClick}
-          className={`relative w-64 h-64 rounded-full bg-gradient-to-br from-cookie-light to-cookie-brown shadow-2xl hover:shadow-3xl transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-orange-300 ${
+          className={`relative w-64 h-64 rounded-full bg-gradient-to-br from-amber-600 to-orange-700 shadow-2xl hover:shadow-yellow-500/50 transition-all duration-200 hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-yellow-500/50 ${
             isAnimating ? 'animate-bounce-cookie' : ''
           }`}
           aria-label="Click cookie"
@@ -60,7 +60,7 @@ export default function CookieButton() {
         {floatingTexts.map((text) => (
           <div
             key={text.id}
-            className="absolute text-4xl font-bold text-yellow-500 pointer-events-none animate-float-up"
+            className="absolute text-4xl font-bold text-yellow-400 pointer-events-none animate-float-up"
             style={{
               left: text.x,
               top: text.y,

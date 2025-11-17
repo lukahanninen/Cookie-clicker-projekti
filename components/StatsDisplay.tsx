@@ -8,8 +8,8 @@ export default function StatsDisplay() {
     useGameStore();
 
   return (
-    <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg shadow-lg p-6">
-      <h2 className="text-2xl font-bold text-gray-800 mb-4">Statistics</h2>
+    <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg shadow-lg p-6 border border-gray-700">
+      <h2 className="text-2xl font-bold text-white mb-4">Statistics</h2>
       
       <div className="space-y-3">
         <StatItem
@@ -56,12 +56,12 @@ function StatItem({
   icon: string;
 }) {
   return (
-    <div className="flex items-center justify-between p-3 bg-white rounded-lg">
+    <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
       <div className="flex items-center gap-2">
         <span className="text-2xl">{icon}</span>
-        <span className="text-gray-700 font-medium">{label}</span>
+        <span className="text-gray-300 font-medium">{label}</span>
       </div>
-      <span className="text-xl font-bold text-blue-600">{value}</span>
+      <span className="text-xl font-bold text-blue-400">{value}</span>
     </div>
   );
 }
